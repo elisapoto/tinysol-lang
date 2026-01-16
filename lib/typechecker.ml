@@ -75,6 +75,7 @@ exception EnumOptionNotFound of ide * ide * ide
 exception EnumDupName of ide
 exception EnumDupOption of ide * ide
 exception MapInLocalDecl of ide * ide
+exception ExternalVisibilityStateVar of ide
 
 let logfun f s = "(" ^ f ^ ")\t" ^ s 
 
@@ -95,8 +96,9 @@ let string_of_typecheck_error = function
 | EnumDupName x -> "enum " ^ x ^ " is declared multiple times"
 | EnumDupOption (x,o) -> "enum option " ^ o ^ " is declared multiple times in enum " ^ x
 | MapInLocalDecl (f,x) -> logfun f "mapping " ^ x ^ " not admitted in local declaration" 
+| ExternalVisibilityStateVar x ->
+    "state variable " ^ x ^ " cannot have external visibility"
 | ex -> Printexc.to_string ex
-
 let exprtype_of_decltype = function
   | IntBT         -> IntET
   | UintBT        -> UintET
@@ -175,6 +177,17 @@ let no_dup_fun_decls vdl =
     | Proc(f,_,_,_,_,_) -> f) 
   |> dup
   |> fun res -> match res with None -> Ok () | Some x -> Error ([MultipleDecl x])  
+
+let no_external_state_vars (vdl : var_decl list) : typecheck_result =
+  List.fold_left
+    (fun acc (vd : var_decl) ->
+      match vd.visibility with
+      | External ->
+          acc >> Error [ExternalVisibilityStateVar vd.name]
+      | _ -> acc
+    )
+    (Ok ())
+    vdl
 
 let subtype t0 t1 = match t1 with
   | BoolConstET _ -> (match t0 with BoolConstET _ -> true | _ -> false) 
@@ -264,7 +277,16 @@ let rec typecheck_expr (f : ide) (edl : enum_decl list) vdl = function
      | _,Ok(t2) -> Error [TypeError (f,e2,t2,IntET)]
      | err1,err2 -> err1 >>+ err2)
 
-  | Div(_) -> failwith "Div: TODO"
+  | Div(e1,e2) ->
+    (match (typecheck_expr f edl vdl e1, typecheck_expr f edl vdl e2) with
+     | Ok(IntConstET n1), Ok(IntConstET n2) ->
+         if n2 = 0 then failwith "TypeChecker Error: Division by zero"
+         else Ok(IntConstET (n1 / n2))
+     | Ok(t1), Ok(t2) when subtype t1 UintET && subtype t2 UintET -> Ok(UintET)
+     | Ok(t1), Ok(t2) when subtype t1 IntET && subtype t2 IntET -> Ok(IntET)
+     | Ok(t1), _ when not (subtype t1 IntET) -> Error [TypeError (f,e1,t1,IntET)]
+     | _, Ok(t2) -> Error [TypeError (f,e2,t2,IntET)]
+     | err1, err2 -> err1 >>+ err2)
 
   | Eq(e1,e2) ->
     (match (typecheck_expr f edl vdl e1,typecheck_expr f edl vdl e2) with
@@ -501,16 +523,15 @@ let typecheck_enums (edl : enum_decl list) =
  *)
 
 let typecheck_contract (Contract(_,edl,vdl,fdl)) : typecheck_result =
-  (* no multiply declared enums *)
-  typecheck_enums edl 
+  typecheck_enums edl
   >>
-  (* no multiply declared state variables *)
   no_dup_var_decls vdl
   >>
-  (* no multiply declared functions *)
+  no_external_state_vars vdl   (* 👈 CERINȚA 5 *)
+  >>
   no_dup_fun_decls fdl
   >>
-  List.fold_left (fun acc fd -> acc >> typecheck_fun edl vdl fd) (Ok ()) fdl  
+  List.fold_left (fun acc fd -> acc >> typecheck_fun edl vdl fd) (Ok ()) fdl
 
 
 let string_of_typecheck_result = function
