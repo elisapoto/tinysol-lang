@@ -282,27 +282,45 @@ opt_cmd:
   | c = cmd { c}
   | { Skip }
 
-opt_fun_mutability_t:
+/* -------------------------------------------------- */
+
+strict_mutability:
   | PURE { Pure }
   | VIEW { View }
   | PAYABLE { Payable }
-  | /* default */ { NonPayable }
+
+fun_header:
+  | v = visibility_t; m = strict_mutability; ret = opt_returns { (v, m, ret) }
+  | m = strict_mutability; v = visibility_t; ret = opt_returns { (v, m, ret) }
+  
+  | v = visibility_t; ret = opt_returns { (v, NonPayable, ret) }
+  
+  | m = strict_mutability; ret = opt_returns { (Public, m, ret) }
+  
+  | ret = opt_returns { (Public, NonPayable, ret) }
+;
+
+fun_decl:
+  | CONSTR; LPAREN; al = formal_args; RPAREN; m = strict_mutability; LBRACE; c = opt_cmd; RBRACE { Constr(al,c,m) }
+  | CONSTR; LPAREN; al = formal_args; RPAREN; LBRACE; c = opt_cmd; RBRACE { Constr(al,c,NonPayable) }
+
+  | FUN; f = ID; LPAREN; al = formal_args; RPAREN; h = fun_header; LBRACE; c = opt_cmd; RBRACE 
+    { match h with (v, m, ret) -> Proc(f, al, c, v, m, ret) }
+
+  /* Receive function */
+  | RECEIVE; LPAREN; al = formal_args; RPAREN; h = fun_header; LBRACE; c = opt_cmd; RBRACE 
+    { match h with (v, m, ret) -> Proc("receive", al, c, v, m, ret) }
+;
+
+/* -------------------------------------------------- */
 
 opt_payable:
   | PAYABLE { true }
   | /* empty */ { false }
 
-fun_modifiers:
-  | v = visibility_t; m = opt_fun_mutability_t { (v,m) }
-  | m = opt_fun_mutability_t; v = visibility_t { (v,m) }
 
-fun_decl:
-  /* constructor(al) payable? { c } */ 
-  | CONSTR; LPAREN; al = formal_args; RPAREN; m = opt_fun_mutability_t; LBRACE; c = opt_cmd; RBRACE { Constr(al,c,m) }
-  /* function f(al) [public|private]? payable? returns(r)? { c } */
-  | FUN; f = ID; LPAREN; al = formal_args; RPAREN; fmod = fun_modifiers; ret = opt_returns; LBRACE; c = opt_cmd; RBRACE { Proc(f,al,c,fst fmod,snd fmod,ret) }
-  | RECEIVE; LPAREN; al = formal_args; RPAREN; fmod = fun_modifiers; ret = opt_returns; LBRACE; c = opt_cmd; RBRACE { Proc("receive",al,c,fst fmod,snd fmod,ret) }
-;
+
+
 
 formal_args:
   | a = separated_list(ARGSEP, formal_arg) { a } ;
